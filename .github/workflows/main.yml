@@ -1,31 +1,65 @@
+# Название пайплайна
 name: Main workflow
+
+# Запускается при пуше в ветку main
 on:
   push:
     branches:
       - main
+
 jobs:
   migrate:
+    # Используем виртуальную машину с Ubuntu
     runs-on: ubuntu-latest
+
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v2
+      # Шаг 1: Клонирование репозитория с кодом
+      - name: Checkout repository
+        uses: actions/checkout@v2
 
-    #### Добавьте шаг с Flyway-миграциями
+      # Шаг 2: Установка Docker Compose (для запуска контейнера с PostgreSQL)
+      - name: Install Docker Compose
+        run: |
+          sudo curl -L "https://github.com/docker/compose/releases/download/v2.24.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+          sudo chmod +x /usr/local/bin/docker-compose
+          docker-compose --version  # Проверка, что установка прошла успешно
 
-    ### Этот шаг оставьте без изменений
-    - name: Download and setup autotests binaries
-      run: |
-        wget -qO- cloud-services-engineer.gitlab.yandexcloud.net/practicum-cloud-services/dbops-autotests/-/package_files/1/download > dbopstest
-        chmod +x ./dbopstest
-        mv ./dbopstest /usr/local/bin/dbopstest
+      # Шаг 3: Запуск PostgreSQL из docker-compose.yml в фоне
+      - name: Start PostgreSQL
+        run: docker-compose up -d
 
-    ### Этот шаг оставьте без изменений
-    - name: Test
-      run: |
-        dbopstest \
-          -test.v \
-          -host=${{ secrets.DB_HOST }} \
-          -port=${{ secrets.DB_PORT }} \
-          -user=${{ secrets.DB_USER }} \
-          -password=${{ secrets.DB_PASSWORD }} \
-          -db=${{ secrets.DB_NAME }}
+      #### Шаг 4: Установка Flyway — инструмента для миграции базы данных
+      - name: Install Flyway
+        run: |
+          wget -q https://repo1.maven.org/maven2/org/flywaydb/flyway-commandline/9.22.2/flyway-commandline-9.22.2-linux-x64.tar.gz
+          tar -xzf flyway-commandline-9.22.2-linux-x64.tar.gz
+          sudo ln -s $PWD/flyway-9.22.2/flyway /usr/local/bin/flyway
+
+      # Шаг 5: Запуск миграций Flyway
+      - name: Run database migrations
+        env:
+          # Переменные подключения к БД берутся из secrets GitHub
+          FLYWAY_URL: jdbc:postgresql://${{ secrets.DB_HOST }}:${{ secrets.DB_PORT }}/${{ secrets.DB_NAME }}
+          FLYWAY_USER: ${{ secrets.DB_USER }}
+          FLYWAY_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          FLYWAY_LOCATIONS: filesystem:migrations  # Путь к папке с миграциями
+        run: |
+          flyway migrate  # Выполнение миграций
+
+      ### Шаг 6: Скачивание бинарников для автотестов (не изменять)
+      - name: Download and setup autotests binaries
+        run: |
+          wget -qO- cloud-services-engineer.gitlab.yandexcloud.net/practicum-cloud-services/dbops-autotests/-/package_files/1/download > dbopstest
+          chmod +x ./dbopstest
+          mv ./dbopstest /usr/local/bin/dbopstest
+
+      ### Шаг 7: Запуск автотестов (не изменять)
+      - name: Test
+        run: |
+          dbopstest \
+            -test.v \
+            -host=${{ secrets.DB_HOST }} \
+            -port=${{ secrets.DB_PORT }} \
+            -user=${{ secrets.DB_USER }} \
+            -password=${{ secrets.DB_PASSWORD }} \
+            -db=${{ secrets.DB_NAME }}
